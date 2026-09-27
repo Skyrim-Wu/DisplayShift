@@ -1,2 +1,120 @@
 # DisplayShift
-One shortcut to switch your displays between Mac and Windows.
+
+一键将三台显示器的输入源切换到 Mac 或 Windows。两台电脑都运行此应用。
+Windows 使用系统 Dxva2，Apple Silicon macOS 使用外部 `m1ddc`。
+全局快捷键默认 `Ctrl + Alt + Shift + D`：Windows 上切向 Mac，Mac 上切向 Windows。
+程序必须保持运行；最小化后快捷键仍工作，关闭窗口即退出。
+
+## 当前接线与验证状态
+
+| 显示器 | Windows | Mac | 默认代码（Windows / Mac） |
+| --- | --- | --- | --- |
+| ASUS VG27AQ3A | HDMI 2 | USB-C 转 HDMI → HDMI 1 | `0x12` / `0x11` |
+| Alienware AW2725QF | DP | Mac 原生 HDMI → HDMI 1 | `0x0f` / `0x11` |
+| LG 27UP850N | DP | USB-C | `0x0f` / **待校准** |
+
+Mac 为 16 英寸 M5 Pro，无扩展坞。2026-09-27 在 Windows / AMD Radeon RX 5700
+上完成只读实机检测，三台显示器均可读取 DDC：ASUS 返回当前输入 `0x12`，
+LG 返回 `0x0f`，Alienware 返回原始值 `0x0f0f`（保留原值，不擅自截断）。
+未进行实际输入切换，未在 Mac 实机运行。不能据此宣称双向三屏切换已验证。
+
+LG 的能力列表包含 `0x11 / 0x12 / 0x0f / 0x10`，其中 `0x10` 是 USB-C 的候选值，
+不是已验证的映射。LG 的能力字符串还自报 `WK95U`，所以身份匹配优先用 EDID
+名称（本机为 `LG ULTRAFINE`）和保存的设备 ID，不使用该能力字符串型号。
+
+## Windows 启动
+
+打包后双击 `dist/DisplayShift/DisplayShift.exe`，无需安装 Python；移动时复制整个
+`DisplayShift` 文件夹。源码运行需 Python 3.11+（包含 Tk）：
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe displayshift.py
+```
+
+## Mac 启动
+
+安装包含 Tk 的 Python 3.11+（例如 python.org 安装包）。使用同一份源码：
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+按 [m1ddc 上游说明](https://github.com/waydabber/m1ddc) 安装当前版本。
+需要 Apple Command Line Tools 的 `clang` 和 `make`。例如在本项目目录：
+
+```bash
+git clone https://github.com/waydabber/m1ddc.git .tools/m1ddc
+make -C .tools/m1ddc
+.tools/m1ddc/m1ddc display list
+.venv/bin/python displayshift.py
+```
+
+在「逐屏设置」中填入 `.tools/m1ddc/m1ddc` 的**绝对路径**，或将可执行文件放入 PATH。
+也会自动查找 `/opt/homebrew/bin/m1ddc` 和 `/usr/local/bin/m1ddc`。
+macOS 全局快捷键可能需要为运行应用或终端授予辅助功能／输入监控权限。
+
+上游当前支持 USB-C / DP Alt Mode 以及部分原生 HDMI 通道，不能笼统说 Mac HDMI
+全不支持；M5 Pro 原生 HDMI 与本条 USB-C 转 HDMI 线能否发送 DDC 仍需实测。
+有画面和能控制显示器不是同一件事。
+
+## 首次配置与 LG 校准
+
+1. 在显示器菜单启用 DDC/CI，打开应用后点「重新检测」。检测只读，不切屏。
+2. 「逐屏设置」中将每个配置绑定到对应的本机显示器。未绑定时仅允许唯一型号匹配；
+   同型号多屏需手动绑定。Windows 和 Mac 的设备 ID 分开保存。
+3. Mac 显示 LG 的 USB-C 画面时，使用「重新检测」查看其当前输入代码；若返回有效值，
+   将它填入**两台电脑**的 LG「Mac 输入代码」。例如检测返回 `16`，填写 `0x10`。
+   配置不会经网络自动同步。仅凭枚举到显示器不能确认输入控制可用。
+4. 每次先只启用一块显示器测试，确认双向切换后再启用全部三块。
+   目的电脑须已接好并有视频输出；若切到无信号画面，可用显示器实体菜单切回。
+
+部分 LG 同系列需要专用地址 `0x50` / VCP `0xf4`，普通 VCP `0x60` 不一定有效。
+本项目的 Mac 后端可选 `lg-alt`，使用 m1ddc 的 `input-alt`。
+[ddcutil 维护者记录](https://github.com/rockowitz/ddcutil/wiki/Switching-input-source-on-LG-monitors)
+中 27UP850-W / 27UP85NP-W 的专用 DP 值为 `0xd0`，USB-C 为 `0xd1`，
+但这不是 27UP850N 的实测结果，不自动套用。
+**Windows 的 LG 专用地址后端尚未实现**；如果本机 LG 拒绝标准切换，当前版本不能
+完成 Windows→Mac 的 LG 切换，会需要进一步接入显卡专用 I²C 控制。
+不能只把 `0xd1` 填进 standard 协议；协议、地址和代码必须对应。
+
+LG 的 Mac 输入为空时，一键切向 Mac 会报告 LG 未完成，仍继续处理 ASUS / Alienware。
+一次写入失败不会中止其他屏幕。命令发送成功只表示驱动接受，界面不会宣称画面已确认切换。
+
+## 配置、诊断与打包
+
+在「逐屏设置」保存时原子写入 `~/.displayshift/config.json`，不在检测时自动写入。
+旧原型的全局输入值格式会明确报错，保留原文件；将其重命名备份后重新配置即可。
+支持 `--config path/to/config.json` 使用另一个配置文件。
+
+```bash
+python displayshift.py --diagnose
+python displayshift.py --switch mac --dry-run
+python displayshift.py --switch windows --dry-run
+# 下面命令会实际发送输入源切换指令：
+python displayshift.py --switch mac
+```
+
+诊断输出含显示器设备标识，不自动上传。软件没有网络服务，不切换键盘鼠标，不启动或唤醒对方电脑。
+`--dry-run` 只枚举并输出计划，未校准／缺失／重复绑定会报告失败。
+
+在各自平台打包（Windows 上不能生成可验证的 Mac .app）：
+
+```bash
+python -m pip install -r requirements-build.txt
+python tools/build.py
+```
+
+Mac 包仍需外部 m1ddc；未签名、未公证。Windows 输出目录包含所有运行时文件。
+
+## 开发验证
+
+```bash
+python -m unittest discover -s tests -v
+python tests/smoke_ui.py
+```
+
+测试覆盖逐屏映射、拔插导致的顺序变化、部分失败继续、重复绑定、快捷键方向、
+配置损坏保护、Mac 命令超时／参数、Tk 设置和忙碌状态。测试不发送真实切换指令。

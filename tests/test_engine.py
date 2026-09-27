@@ -138,6 +138,36 @@ class EngineTests(unittest.TestCase):
 
 
 class MacTests(unittest.TestCase):
+    @patch.object(MacBackend, 'command')
+    def test_aw_repeated_input_bytes_are_model_specific(self, command):
+        backend = MacBackend('/m1ddc')
+        for raw, expected in [('4369', 17), ('3855', 15), ('4626', 18), ('17', 17)]:
+            command.return_value = raw
+            display = Display('id', 'AW2725QF')
+            backend.probe(display)
+            self.assertEqual(expected, display.current_input)
+        for name, raw in [('LG ULTRAFINE', '4369'), ('AW2725QF', '2809'),
+                          ('VG27AQ3A', '0'), ('AW2725QF', '4370')]:
+            command.return_value = raw
+            display = Display('id', name, 17)
+            backend.probe(display)
+            self.assertIsNone(display.current_input)
+
+    @patch.object(MacBackend, 'command')
+    def test_null_reply_clears_previous_value(self, command):
+        command.side_effect = RuntimeError('DDC null reply: display did not answer the VCP query.')
+        display = Display('id', 'LG ULTRAFINE', 16)
+        MacBackend('/m1ddc').probe(display)
+        self.assertIsNone(display.current_input)
+        self.assertIn('空应答', display.detail)
+
+    @patch.object(MacBackend, 'command', return_value='15')
+    def test_lg_standard_read_is_not_claimed_to_be_calibrated(self, command):
+        display = Display('id', 'LG ULTRAFINE')
+        MacBackend('/m1ddc').probe(display)
+        self.assertEqual(15, display.current_input)
+        self.assertIn('不能据此校准', display.detail)
+
     def test_parse_uuid_and_preserve_name(self):
         found = MacBackend.parse_displays('[1] LG ULTRAFINE (12345678-1234-1234-1234-123456789abc)\n[2] AW2725QF (98765432-1234-1234-1234-123456789abc)')
         self.assertEqual('LG ULTRAFINE', found[0].name)

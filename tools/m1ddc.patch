@@ -1,0 +1,84 @@
+diff --git a/sources/i2c.m b/sources/i2c.m
+index 08d7303..1786c7a 100644
+--- a/sources/i2c.m
++++ b/sources/i2c.m
+@@ -74,12 +74,12 @@ DDCValue convertI2CtoDDC(char *i2cBytes) {
+     // current value in bytes [8..9], both big-endian.
+     NSRange maxValueRange = {6, 2};
+     uint16_t maxValue = 0;
+-    [[i2cData subdataWithRange:maxValueRange] getBytes:&maxValue length:sizeof(2)];
++    [[i2cData subdataWithRange:maxValueRange] getBytes:&maxValue length:sizeof(uint16_t)];
+     displayAttr.maxValue = CFSwapInt16BigToHost(maxValue);
+ 
+     NSRange curValueRange = {8, 2};
+     uint16_t curValue = 0;
+-    [[i2cData subdataWithRange:curValueRange] getBytes:&curValue length:sizeof(2)];
++    [[i2cData subdataWithRange:curValueRange] getBytes:&curValue length:sizeof(uint16_t)];
+     displayAttr.curValue = CFSwapInt16BigToHost(curValue);
+ 
+     return displayAttr;
+diff --git a/sources/ioregistry.m b/sources/ioregistry.m
+index d1a4983..9d61cae 100644
+--- a/sources/ioregistry.m
++++ b/sources/ioregistry.m
+@@ -44,6 +44,7 @@ CGDisplayCount getOnlineDisplayInfos(DisplayInfos* displayInfos) {
+     int validDisplayCount = 0;
+     // Fetching each display infos from IOKit
+     for (int i = 0; i < (int)screenCount && validDisplayCount < MAX_DISPLAYS; i++) {
++        if (CGDisplayIsBuiltin(screenList[i])) continue;
+         DisplayInfos *currDisplay = displayInfos + validDisplayCount;
+         currDisplay->id = screenList[i];
+ 
+diff --git a/sources/m1ddc.m b/sources/m1ddc.m
+index 4b30fa7..9af03c1 100644
+--- a/sources/m1ddc.m
++++ b/sources/m1ddc.m
+@@ -1,3 +1,4 @@
++#include "displayshift_reply.h"
+ @import Darwin;
+ @import Foundation;
+ @import IOKit;
+@@ -102,7 +103,7 @@ static void printDisplayInfos(DisplayInfos *display, int nbDisplays, bool detail
+ }
+ 
+ // Function to handle the reading operation (get, max, chg)
+-static DDCValue readingOperation(DDCTransport *transport, DDCPacket *packet) {
++static DDCValue readingOperation(DDCTransport *transport, DDCPacket *packet, int lgLengthQuirk) {
+     DDCValue dummyAttr = {-1, -1};
+ 
+     prepareDDCRead(packet->data);
+@@ -122,6 +123,23 @@ static DDCValue readingOperation(DDCTransport *transport, DDCPacket *packet) {
+         return dummyAttr;
+     }
+ 
++    // IOAVService can succeed with a null reply and stale trailing bytes.
++    // Never interpret those bytes as a VCP value.
++    UInt8 *reply = readPacket.data;
++    if (getenv("DISPLAYSHIFT_DDC_DEBUG")) {
++        for (int i = 0; i < 12; i++) fprintf(stderr, "%02x ", reply[i]);
++        fprintf(stderr, "\n");
++    }
++    int status = ds_validate_reply(reply, 12, packet->data[2], lgLengthQuirk);
++    if (status != DS_REPLY_OK) {
++        const char *message = status == DS_REPLY_NULL
++            ? "DDC null reply: display did not answer the VCP query."
++            : status == DS_REPLY_UNSUPPORTED
++            ? "DDC feature unsupported by this display."
++            : "Invalid DDC reply: header, feature or checksum mismatch.";
++        fprintf(stderr, "%s\n", message);
++        exit(EXIT_FAILURE);
++    }
+     return convertI2CtoDDC((char *)readPacket.data);
+ }
+ 
+@@ -279,7 +297,9 @@ int main(int argc, char** argv) {
+ 
+     // Reading current
+     if (!STR_EQ(argv[0], "set")) {
+-        displayAttr = readingOperation(&transport, &packet);
++        int lgLengthQuirk = selectedDisplay != NULL
++            && selectedDisplay->vendor == 0x1e6d && selectedDisplay->model == 0x5bcb;
++        displayAttr = readingOperation(&transport, &packet, lgLengthQuirk);
+         if (displayAttr.curValue == -1) {
+             return EXIT_FAILURE;
+         }

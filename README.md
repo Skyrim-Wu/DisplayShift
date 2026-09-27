@@ -16,7 +16,7 @@ Windows 使用系统 Dxva2，Apple Silicon macOS 使用外部 `m1ddc`。
 Mac 为 16 英寸 M5 Pro，无扩展坞。2026-09-27 在 Windows / AMD Radeon RX 5700
 上完成只读实机检测，三台显示器均可读取 DDC：ASUS 返回当前输入 `0x12`，
 LG 返回 `0x0f`，Alienware 返回原始值 `0x0f0f`（保留原值，不擅自截断）。
-未进行实际输入切换，未在 Mac 实机运行。不能据此宣称双向三屏切换已验证。
+随后在 Mac 上完成安装和下述 LG 单屏实测；双向三屏切换仍未全部验证。
 
 LG 的能力列表包含 `0x11 / 0x12 / 0x0f / 0x10`，其中 `0x10` 是 USB-C 的候选值，
 不是已验证的映射。LG 的能力字符串还自报 `WK95U`，所以身份匹配优先用 EDID
@@ -47,6 +47,9 @@ python3 -m venv .venv
 
 ```bash
 git clone https://github.com/waydabber/m1ddc.git .tools/m1ddc
+git -C .tools/m1ddc checkout 04d949794102eb8df01ad3681afff6464a3eede2
+git -C .tools/m1ddc apply ../../tools/m1ddc.patch
+cp tools/displayshift_reply.h .tools/m1ddc/headers/
 make -C .tools/m1ddc
 .tools/m1ddc/m1ddc display list
 .venv/bin/python displayshift.py
@@ -55,6 +58,21 @@ make -C .tools/m1ddc
 在「逐屏设置」中填入 `.tools/m1ddc/m1ddc` 的**绝对路径**，或将可执行文件放入 PATH。
 也会自动查找 `/opt/homebrew/bin/m1ddc` 和 `/usr/local/bin/m1ddc`。
 macOS 全局快捷键可能需要为运行应用或终端授予辅助功能／输入监控权限。
+
+本项目提供的 `tools/m1ddc.patch` 对上述固定版本修复：排除 Mac 内置屏幕，
+校验 DDC 回复的头部、功能码和校验和，拒绝将空应答后的残留数据解释为输入代码，
+并修正 16 位数值复制长度。已经应用过补丁时不要重复执行 `git apply`。
+更新工具后，也需替换应用设置中 `m1ddc_path` 指向的可执行文件。
+
+2026-09-27 Mac 只读检查：AW2725QF 的有效回复为 `0x1111`，应用对该型号的
+`0x0f0f / 0x1111 / 0x1212` 映射为 DP / HDMI 1 / HDMI 2，并保留原值显示。
+LG 和 ASUS 当时返回 DDC 空应答，不能用尾部的 `2809` 或 `0` 校准。
+随后 LG 在用户确认显示 Mac USB-C 画面时返回 `0x0f`，与 Windows DP 读数相同。
+该 LG（vendor `0x1e6d` / model `0x5bcb`）回复的长度字节为 `0x51`，但校验和按
+标准长度 `0x88` 生成；补丁仅对该型号兼容此格式，并继续验证功能码和校验和。
+对应解析器位于 `tools/displayshift_reply.h`，测试使用实机捕获数据及损坏数据。
+这不证明输入写入一定失败；也不能据此宣称切换已验证。LG 的 Mac 输入代码仍需
+在有效读取或实际逐屏切换验证后填写，不会自动猜测。
 
 上游当前支持 USB-C / DP Alt Mode 以及部分原生 HDMI 通道，不能笼统说 Mac HDMI
 全不支持；M5 Pro 原生 HDMI 与本条 USB-C 转 HDMI 线能否发送 DDC 仍需实测。
@@ -75,7 +93,15 @@ macOS 全局快捷键可能需要为运行应用或终端授予辅助功能／�
 本项目的 Mac 后端可选 `lg-alt`，使用 m1ddc 的 `input-alt`。
 [ddcutil 维护者记录](https://github.com/rockowitz/ddcutil/wiki/Switching-input-source-on-LG-monitors)
 中 27UP850-W / 27UP85NP-W 的专用 DP 值为 `0xd0`，USB-C 为 `0xd1`，
-但这不是 27UP850N 的实测结果，不自动套用。
+其 USB-C 值不能直接当作本机已验证映射。
+
+2026-09-27 本机 27UP850N 实测：普通 `standard / 0x0f` 未切换；从 Mac 的
+USB-C 通道发送 `lg-alt / 0xd0` 后，用户确认成功切到 Windows / DisplayPort。
+切换后从 Mac 发送 `lg-alt / 0xd1`，用户确认仍停留在 Windows，读取也变为
+DDC 空应答。这可能是非当前输入通道无法控制，尚不能区分通道限制与回切代码问题。
+本机配置已将 LG 的 Windows 输入改为 `lg-alt / 0xd0`，Mac 输入保留空值，
+以免把未成功的回切宣称为已校准。恢复 Mac 画面可用显示器菜单手动选择 USB-C。
+
 **Windows 的 LG 专用地址后端尚未实现**；如果本机 LG 拒绝标准切换，当前版本不能
 完成 Windows→Mac 的 LG 切换，会需要进一步接入显卡专用 I²C 控制。
 不能只把 `0xd1` 填进 standard 协议；协议、地址和代码必须对应。

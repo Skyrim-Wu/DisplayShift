@@ -43,14 +43,34 @@ class MacBackend:
         yield self.parse_displays(self.command('display', 'list'))
 
     def probe(self, display):
+        display.current_input = None
         try:
             value = self.command('display', display.identifier, 'get', 'input')
-            if not value.isdecimal() or not 0 < int(value) <= 255:
-                raise ValueError('显示器未返回有效的输入源代码')
-            display.current_input = int(value)
-            display.detail = f'当前输入 {int(value):#04x}'
+            if not value.isdecimal():
+                raise ValueError(f'无法识别 m1ddc 返回值：{value!r}')
+            raw = int(value)
+            # AW2725QF duplicates the input byte (observed 0x1111 on HDMI 1,
+            # 0x0f0f on Windows DP). Do not truncate arbitrary 16-bit replies.
+            duplicated = (display.name.upper() == 'AW2725QF'
+                          and raw in (0x0f0f, 0x1111, 0x1212))
+            current = raw & 0xff if duplicated else raw
+            if not 0 < current <= 255:
+                raise ValueError(f'无有效输入代码（原始值 {raw:#06x}）；请检查 DDC/CI 和连接线')
+            display.current_input = current
+            display.detail = f'当前输入 {current:#04x}'
+            if duplicated:
+                display.detail += f'（原始值 {raw:#06x}，已识别 AW2725QF 重复字节）'
+            if display.name.upper() == 'LG ULTRAFINE':
+                display.detail += '（标准 DDC 读数；本机 USB-C 与 DP 曾返回相同值，不能据此校准）'
         except Exception as exc:
-            display.detail = f'输入读取失败：{exc}'
+            if 'DDC null reply' in str(exc):
+                display.detail = '显示器返回 DDC 空应答；请确认当前输入和连接线，当前输入无法自动校准'
+            elif 'Invalid DDC reply' in str(exc):
+                display.detail = '显示器回复校验失败；未采用该读数，请重新检测'
+            elif 'DDC feature unsupported' in str(exc):
+                display.detail = '显示器不支持读取此输入代码；需手动校准'
+            else:
+                display.detail = f'输入读取失败：{exc}'
 
     @staticmethod
     def check_protocol(protocol):

@@ -4,6 +4,7 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -12,7 +13,10 @@ from .engine import Display
 
 class MacBackend:
     def __init__(self, executable=''):
-        self.executable = executable or shutil.which('m1ddc') or next(
+        bundled = Path(getattr(sys, '_MEIPASS', '')) / 'bin' / 'm1ddc'
+        self.executable = executable or (
+            str(bundled) if getattr(sys, 'frozen', False) and bundled.is_file() else ''
+        ) or shutil.which('m1ddc') or next(
             (p for p in ('/opt/homebrew/bin/m1ddc', '/usr/local/bin/m1ddc') if Path(p).is_file()), '')
 
     def command(self, *args):

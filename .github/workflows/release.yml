@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            arch: x64
+            artifact: Windows-x64
+          - os: macos-15
+            arch: arm64
+            artifact: macOS-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: ${{ matrix.arch }}
+          cache: pip
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-build.txt
+      - name: Test engine and native reply parser
+        run: python -m unittest discover -s tests -v
+      - name: Test desktop lifecycle without hardware writes
+        run: python tests/smoke_ui.py
+      - name: Checkout pinned m1ddc
+        if: runner.os == 'macOS'
+        uses: actions/checkout@v4
+        with:
+          repository: waydabber/m1ddc
+          ref: 04d949794102eb8df01ad3681afff6464a3eede2
+          path: .tools/m1ddc
+          persist-credentials: false
+      - name: Build patched embedded helper
+        if: runner.os == 'macOS'
+        run: |
+          git -C .tools/m1ddc apply ../../tools/m1ddc.patch
+          cp tools/displayshift_reply.h .tools/m1ddc/headers/
+          make -C .tools/m1ddc
+          file .tools/m1ddc/m1ddc
+      - name: Build standalone app
+        run: python tools/build.py
+      - name: Verify Windows bundle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $check = Start-Process -FilePath dist/DisplayShift/DisplayShift.exe -ArgumentList '--self-check' -WindowStyle Hidden -PassThru -Wait
+          if ($check.ExitCode -ne 0) { throw "Bundle self-check failed: $($check.ExitCode)" }
+      - name: Verify Mac bundle and embedded helper
+        if: runner.os == 'macOS'
+        run: |
+          dist/DisplayShift.app/Contents/MacOS/DisplayShift --self-check
+          codesign --verify --deep --strict dist/DisplayShift.app
+      - name: Package archives
+        shell: bash
+        env:
+          RELEASE_REF: ${{ github.ref_name }}
+          RELEASE_REF_TYPE: ${{ github.ref_type }}
+        run: |
+          VERSION=v0.0.0-test
+          if [ "$RELEASE_REF_TYPE" = tag ]; then VERSION="$RELEASE_REF"; fi
+          python tools/package_release.py --version "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/release/*
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Publish both platforms together
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$RELEASE_TAG" release-assets/* --verify-tag --title "DisplayShift $RELEASE_TAG" --notes-file RELEASE-README.md

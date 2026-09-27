@@ -6,3 +6,4 @@ dist/
 *.spec
 diagnostics*.json
 .tools/
+config.windows-lg.json

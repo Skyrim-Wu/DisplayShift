@@ -47,15 +47,18 @@ class FakeBackend:
 class EngineTests(unittest.TestCase):
     def setUp(self):
         self.config = copy.deepcopy(DEFAULT_CONFIG)
+        for profile in self.config['displays']:
+            profile['enabled'] = True
 
     def test_windows_mapping_survives_reorder_and_topology_change(self):
         backend = FakeBackend()
         results = switch_all(self.config, backend, 'Darwin', 'windows')
-        self.assertEqual([('asus', 18, 'standard'), ('alien', 15, 'standard'), ('lg', 15, 'standard')], backend.writes)
+        self.assertEqual([('asus', 18, 'standard'), ('alien', 15, 'standard'), ('lg', 208, 'lg-alt')], backend.writes)
         self.assertTrue(all(r.status == 'sent' for r in results))
         self.assertFalse(backend.open)
 
     def test_uncalibrated_lg_does_not_write_guessed_value(self):
+        self.config['displays'][2]['mac_input'] = ''
         backend = FakeBackend()
         results = switch_all(self.config, backend, 'Windows', 'mac')
         self.assertEqual([('asus', 17, 'standard'), ('alien', 17, 'standard')], backend.writes)
@@ -94,7 +97,7 @@ class EngineTests(unittest.TestCase):
         self.config['displays'][1]['match'] = ['VG27AQ3A']
         backend = FakeBackend()
         results = switch_all(self.config, backend, 'Windows', 'windows')
-        self.assertEqual([('lg', 15, 'standard')], backend.writes)
+        self.assertEqual([('lg', 208, 'lg-alt')], backend.writes)
         self.assertEqual(2, sum(r.status == 'failed' for r in results))
 
     def test_disabled_display_is_excluded(self):

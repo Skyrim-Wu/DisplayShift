@@ -5,6 +5,7 @@ import copy
 import json
 import platform
 import queue
+import sys
 import threading
 from dataclasses import asdict
 from pathlib import Path
@@ -193,7 +194,7 @@ class DisplayShift:
         body = ttk.Frame(dialog, padding=20)
         body.pack(fill='both', expand=True)
         ttk.Label(body, text='按本机检测到的显示器绑定。输入代码可填十进制或 0x 开头的十六进制。', wraplength=700).pack(anchor='w')
-        ttk.Label(body, text='LG USB-C 先在 Mac 检测当前输入再填写；LG 专用协议在 Windows 上尚未接入。', wraplength=700, padding=(0, 4, 0, 14)).pack(anchor='w')
+        ttk.Label(body, text='LG 专用协议支持 Mac 和 AMD 显卡的 Windows；输入代码需逐屏实测，标准读数可能不区分 USB-C 与 DP。', wraplength=700, padding=(0, 4, 0, 14)).pack(anchor='w')
         choices = ['自动匹配型号'] + [f'{d.name} [{d.identifier}]' for d in self.displays]
         rows = []
         notebook = ttk.Notebook(body)
@@ -301,6 +302,15 @@ def main(argv=None):
             root.withdraw()
             root.update_idletasks()
             root.destroy()
+            if platform.system() == 'Darwin' and getattr(sys, 'frozen', False):
+                import subprocess
+                from shiftcore.backends import MacBackend
+                helper = Path(sys._MEIPASS) / 'bin' / 'm1ddc'
+                if not helper.is_file() or MacBackend().executable != str(helper):
+                    raise RuntimeError('打包缺少内置 m1ddc')
+                check = subprocess.run([str(helper), 'help'], capture_output=True, timeout=12)
+                if check.returncode not in (0, 1) or not check.stdout:
+                    raise RuntimeError('内置 m1ddc 无法启动')
             return 0
         config = load_config(args.config)
         backend = create_backend(config)

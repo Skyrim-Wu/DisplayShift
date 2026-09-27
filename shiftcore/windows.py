@@ -42,6 +42,7 @@ def edid_name(identifier):
 
 class WindowsBackend:
     def __init__(self):
+        self.adl = None
         self.user = c.WinDLL('user32', use_last_error=True)
         self.dx = c.WinDLL('dxva2', use_last_error=True)
         self.callback_type = c.WINFUNCTYPE(w.BOOL, w.HANDLE, w.HDC, c.POINTER(w.RECT), w.LPARAM)
@@ -95,6 +96,9 @@ class WindowsBackend:
                 displays.append(Display(identifier, name, handle=physical[0].handle))
             yield displays
         finally:
+            if self.adl is not None:
+                self.adl.close()
+                self.adl = None
             for count, physical in allocated:
                 self.dx.DestroyPhysicalMonitors(count, physical)
 
@@ -111,12 +115,35 @@ class WindowsBackend:
             if self.dx.CapabilitiesRequestAndCapabilitiesReply(display.handle, buffer, length):
                 display.detail += '\nCapabilities: ' + buffer.value.decode('ascii', errors='replace')
 
-    @staticmethod
-    def check_protocol(protocol):
-        if protocol != 'standard':
-            raise RuntimeError('Windows 标准接口不能发送 LG 专用地址；需要显卡专用控制后端')
+    def identifiers_for_gdi(self, gdi):
+        identifiers = []
+        index = 0
+        while True:
+            device = DeviceInfo()
+            device.size = c.sizeof(device)
+            if not self.user.EnumDisplayDevicesW(gdi, index, c.byref(device), 1):
+                break
+            if device.flags & 1 and device.identifier:
+                identifiers.append(device.identifier)
+            index += 1
+        return identifiers
+
+    def check_protocol(self, protocol):
+        if protocol == 'lg-alt':
+            if self.adl is None:
+                from .amd import AmdAdl
+                self.adl = AmdAdl()
+        elif protocol != 'standard':
+            raise ValueError('不支持的控制协议')
 
     def write(self, display, value, protocol):
         self.check_protocol(protocol)
+        if protocol == 'lg-alt':
+            from .amd import match_route
+            if not display.identifier.upper().startswith('\\\\?\\DISPLAY#GSM'):
+                raise RuntimeError('LG 专用协议仅用于 LG 显示器；请检查绑定和协议')
+            route = match_route(self.adl.routes(), display.identifier, self.identifiers_for_gdi)
+            self.adl.write(route, value)
+            return
         if not self.dx.SetVCPFeature(display.handle, 0x60, value):
             raise c.WinError(c.get_last_error())

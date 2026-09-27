@@ -21,8 +21,8 @@ DEFAULT_CONFIG = {
          'ids': {}, 'protocol': 'standard', 'mac_input': '0x11', 'windows_input': '0x0f',
          'mac_port': 'HDMI 1 · Mac 原生 HDMI', 'windows_port': 'DisplayPort'},
         {'name': 'LG 27UP850N', 'match': ['27UP850', 'LG ULTRAFINE'], 'enabled': True,
-         'ids': {}, 'protocol': 'standard', 'mac_input': '', 'windows_input': '0x0f',
-         'mac_port': 'USB-C · 输入代码待校准', 'windows_port': 'DisplayPort'},
+         'ids': {}, 'protocol': 'lg-alt', 'mac_input': '0xd1', 'windows_input': '0xd0',
+         'mac_port': 'USB-C', 'windows_port': 'DisplayPort'},
     ],
 }
 

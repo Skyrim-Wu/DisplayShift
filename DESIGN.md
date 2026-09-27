@@ -14,7 +14,11 @@ and https://developer.apple.com/design/human-interface-guidelines/accessibility
 Hardware truth: detected does not mean controllable; accepted writes do not prove
 visible switching. Use “command sent”, not “switched successfully”. Keep raw DDC
 values for unusual firmware replies; never silently truncate them into a known port.
-The LG USB-C code remains unset until calibrated on this exact monitor.
+The default profile enables all three named displays with the documented wiring.
+LG uses the locally verified lg-alt 0xd0 / 0xd1 mapping. Existing saved selections
+are preserved; single-display test profiles must not become the release default.
+A driver-accepted write must remain distinct from a user-confirmed visible switch. Windows lg-alt
+currently requires AMD ADL; settings copy must state that hardware requirement.
 
 Validation: Python engine tests and Tk lifecycle smoke checks. Native screen-reader
 behavior, macOS rendering and physical switching require tests on the target hosts.
